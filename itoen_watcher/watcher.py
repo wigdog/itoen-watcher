@@ -101,6 +101,11 @@ SHOT_DIR.mkdir(exist_ok=True)
 # 短すぎるとサーバーに負荷をかけるので、20〜30分を推奨。
 CHECK_INTERVAL_MINUTES = 20
 
+# 定期診断通知（ハートビート）: 空きがなくても定期的に「動いてます、まだ×です」
+# を1通にまとめて送る間隔（時間）。GitHub Actionsのスケジュールは正確ではないため、
+# 実際には設定値より間延びする（例: 3時間設定→実態6時間程度）ことを想定済み。
+HEARTBEAT_INTERVAL_HOURS = 3
+
 
 # ============================================================
 # 通知処理
@@ -218,25 +223,28 @@ def run_search_for_hotel(page, hotel_name: str, date_str: str) -> CheckResult:
     page.wait_for_load_state("networkidle", timeout=30000)
 
     # --- 結果を保存・判定 ---
-    # 結果ページの構造がまだ確認できていないため、判定用の正規表現が外れても
-    # 後から見返せるよう、スクリーンショットとHTMLを毎回保存しておく
+    # 実際のページ構造を確認済み: 結果テーブルは id="ypro_stock_calendar" で、
+    # 検索した宿泊日は必ず一番左のデータ列(id="ypro_stock_calendar0_0")に来る。
+    # なので該当セルをピンポイントで読めば確実（正規表現による曖昧な推測は不要）。
     safe_name = re.sub(r"[^\w]", "_", hotel_name)
     shot_path = SHOT_DIR / f"{safe_name}_{date_str}.png"
     html_path = SHOT_DIR / f"{safe_name}_{date_str}.html"
     page.screenshot(path=str(shot_path), full_page=True)
     html_path.write_text(page.content(), encoding="utf-8")
 
-    body_text = page.locator("body").inner_text()
+    target_cell = page.locator("#ypro_stock_calendar0_0")
 
-    day_int = int(d)
-    pattern = re.compile(rf"{day_int}\D{{0,6}}([○◎△×－―]|満室)")
-    match = pattern.search(body_text)
+    if target_cell.count() == 0:
+        # 万一テーブル構造が変わっていた場合の保険として、
+        # 従来の正規表現ベースの推測にフォールバックする
+        body_text = page.locator("body").inner_text()
+        day_int = int(d)
+        pattern = re.compile(rf"{day_int}\D{{0,6}}([○◎△×－―]|満室)")
+        match = pattern.search(body_text)
+        mark = match.group(1) if match else "不明"
+    else:
+        mark = target_cell.inner_text().strip()
 
-    if not match:
-        return CheckResult(hotel=hotel_name, date=date_str, available=False,
-                            raw_mark="不明", screenshot=str(shot_path))
-
-    mark = match.group(1)
     is_available = mark in AVAILABLE_MARKS
     return CheckResult(hotel=hotel_name, date=date_str, available=is_available,
                         raw_mark=mark, screenshot=str(shot_path))
@@ -245,6 +253,7 @@ def run_search_for_hotel(page, hotel_name: str, date_str: str) -> CheckResult:
 def run_once() -> None:
     state = load_state()
     changed_any = False
+    results_summary = []
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -256,12 +265,15 @@ def run_once() -> None:
                 result = run_search_for_hotel(page, hotel_name, TARGET_DATE)
             except Exception as e:
                 print(f"[ERROR] {hotel_name} のチェック中にエラー: {e}")
+                results_summary.append(f"{hotel_name}: チェック失敗（{e}）")
                 continue
 
             prev_available = state.get(key, {}).get("available", False)
             print(f"{hotel_name} / {TARGET_DATE}: 記号={result.raw_mark} "
                   f"空きあり={result.available} (前回: {prev_available}) "
                   f"[{result.screenshot}]")
+            results_summary.append(f"{hotel_name}: {result.raw_mark}"
+                                    f"（{'空きあり' if result.available else '空きなし'}）")
 
             if result.available and not prev_available:
                 notify(
@@ -273,6 +285,27 @@ def run_once() -> None:
             state[key] = asdict(result)
 
         browser.close()
+
+    # --- 定期診断通知（ハートビート） ---
+    # 空きの有無にかかわらず、一定時間おきに「監視は生きています」を
+    # 3施設まとめて1通で知らせる。
+    last_heartbeat_str = state.get("_last_heartbeat")
+    now = datetime.now()
+    should_send_heartbeat = True
+    if last_heartbeat_str:
+        last_heartbeat = datetime.fromisoformat(last_heartbeat_str)
+        elapsed_hours = (now - last_heartbeat).total_seconds() / 3600
+        should_send_heartbeat = elapsed_hours >= HEARTBEAT_INTERVAL_HOURS
+
+    if should_send_heartbeat:
+        summary_text = "\n".join(results_summary)
+        notify(
+            f"【定期診断】{TARGET_DATE} の空室監視レポート\n"
+            f"{summary_text}\n\n"
+            f"（{HEARTBEAT_INTERVAL_HOURS}時間おき設定のハートビート通知です。"
+            f"空きが出た場合は別途、変化があった瞬間に通知します）"
+        )
+        state["_last_heartbeat"] = now.isoformat()
 
     save_state(state)
 
