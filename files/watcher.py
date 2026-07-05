@@ -101,6 +101,11 @@ SHOT_DIR.mkdir(exist_ok=True)
 # 短すぎるとサーバーに負荷をかけるので、20〜30分を推奨。
 CHECK_INTERVAL_MINUTES = 20
 
+# 定期診断通知（ハートビート）: 空きがなくても定期的に「動いてます、まだ×です」
+# を1通にまとめて送る間隔（時間）。GitHub Actionsのスケジュールは正確ではないため、
+# 実際には設定値より間延びする（例: 3時間設定→実態6時間程度）ことを想定済み。
+HEARTBEAT_INTERVAL_HOURS = 3
+
 
 # ============================================================
 # 通知処理
@@ -248,6 +253,7 @@ def run_search_for_hotel(page, hotel_name: str, date_str: str) -> CheckResult:
 def run_once() -> None:
     state = load_state()
     changed_any = False
+    results_summary = []
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -259,12 +265,15 @@ def run_once() -> None:
                 result = run_search_for_hotel(page, hotel_name, TARGET_DATE)
             except Exception as e:
                 print(f"[ERROR] {hotel_name} のチェック中にエラー: {e}")
+                results_summary.append(f"{hotel_name}: チェック失敗（{e}）")
                 continue
 
             prev_available = state.get(key, {}).get("available", False)
             print(f"{hotel_name} / {TARGET_DATE}: 記号={result.raw_mark} "
                   f"空きあり={result.available} (前回: {prev_available}) "
                   f"[{result.screenshot}]")
+            results_summary.append(f"{hotel_name}: {result.raw_mark}"
+                                    f"（{'空きあり' if result.available else '空きなし'}）")
 
             if result.available and not prev_available:
                 notify(
@@ -276,6 +285,27 @@ def run_once() -> None:
             state[key] = asdict(result)
 
         browser.close()
+
+    # --- 定期診断通知（ハートビート） ---
+    # 空きの有無にかかわらず、一定時間おきに「監視は生きています」を
+    # 3施設まとめて1通で知らせる。
+    last_heartbeat_str = state.get("_last_heartbeat")
+    now = datetime.now()
+    should_send_heartbeat = True
+    if last_heartbeat_str:
+        last_heartbeat = datetime.fromisoformat(last_heartbeat_str)
+        elapsed_hours = (now - last_heartbeat).total_seconds() / 3600
+        should_send_heartbeat = elapsed_hours >= HEARTBEAT_INTERVAL_HOURS
+
+    if should_send_heartbeat:
+        summary_text = "\n".join(results_summary)
+        notify(
+            f"【定期診断】{TARGET_DATE} の空室監視レポート\n"
+            f"{summary_text}\n\n"
+            f"（{HEARTBEAT_INTERVAL_HOURS}時間おき設定のハートビート通知です。"
+            f"空きが出た場合は別途、変化があった瞬間に通知します）"
+        )
+        state["_last_heartbeat"] = now.isoformat()
 
     save_state(state)
 
