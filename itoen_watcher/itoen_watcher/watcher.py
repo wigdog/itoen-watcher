@@ -42,11 +42,13 @@ import sys
 import time
 import urllib.request
 from dataclasses import dataclass, asdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from email.mime.text import MIMEText
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+
+import stats
 
 # ============================================================
 # CONFIG - ここを自分の状況に合わせて書き換える
@@ -105,6 +107,13 @@ CHECK_INTERVAL_MINUTES = 20
 # を1通にまとめて送る間隔（時間）。GitHub Actionsのスケジュールは正確ではないため、
 # 実際には設定値より間延びする（例: 3時間設定→実態6時間程度）ことを想定済み。
 HEARTBEAT_INTERVAL_HOURS = 3
+
+# ベイズ推定用の設定
+# 実際のチェック間隔（時間）。GitHub Actionsのcron設定と合わせる。
+NOMINAL_CHECK_INTERVAL_HOURS = 1
+# μ(空きの継続時間)がまだ1件も実測できていないときに使う仮定値(時間)。
+# 「早押し合戦で一瞬で消える」想定の保守的な値。
+ASSUMED_WINDOW_HOURS_IF_UNKNOWN = 0.25
 
 
 # ============================================================
@@ -250,6 +259,60 @@ def run_search_for_hotel(page, hotel_name: str, date_str: str) -> CheckResult:
                         raw_mark=mark, screenshot=str(shot_path))
 
 
+def update_stats_and_report(state: dict, combined_available: bool) -> str:
+    """
+    今回のチェック結果(combined_available)を反映してλ・μの推定を更新し、
+    レポート文字列を返す。state は呼び出し側で save_state() される想定。
+    """
+    now = datetime.now()
+
+    if "_stats_log_first_ts" not in state:
+        # 初回のみ: これまでチャットで手計算していた実績
+        # (約8.2日の観測期間中に1件の発生を確認済み)を初期値としてシードする。
+        # ゼロから再スタートさせず、これまでの実績を引き継ぐための措置。
+        seed_days_ago = now - timedelta(days=8.2)
+        state["_stats_log_first_ts"] = seed_days_ago.isoformat()
+        state["_stats_arrivals"] = 1
+
+    prev_combined = state.get("_stats_last_combined_available", False)
+    arrivals = state.get("_stats_arrivals", 0)
+    open_windows = state.get("_stats_open_windows", [])
+
+    if combined_available and not prev_combined:
+        # 満室 → 空き への遷移。新しい「発生」を1件カウントし、
+        # 窓の開始時刻を記録しておく（後で閉じた時に継続時間を測るため）
+        arrivals += 1
+        state["_stats_available_since_ts"] = now.isoformat()
+
+    if (not combined_available) and prev_combined:
+        # 空き → 満室 への遷移。窓が閉じたので、継続時間(時間)を記録する
+        since_ts_str = state.get("_stats_available_since_ts")
+        if since_ts_str:
+            since_ts = datetime.fromisoformat(since_ts_str)
+            duration_hours = (now - since_ts).total_seconds() / 3600
+            open_windows.append(duration_hours)
+
+    state["_stats_last_combined_available"] = combined_available
+    state["_stats_arrivals"] = arrivals
+    state["_stats_open_windows"] = open_windows
+
+    first_ts = datetime.fromisoformat(state["_stats_log_first_ts"])
+    observed_days = (now - first_ts).total_seconds() / 86400
+
+    target_dt = datetime.strptime(TARGET_DATE, "%Y-%m-%d")
+    remaining_days = (target_dt - now).total_seconds() / 86400
+
+    report = stats.build_report(
+        arrivals=arrivals,
+        observed_days=observed_days,
+        open_window_hours=open_windows,
+        check_interval_hours=NOMINAL_CHECK_INTERVAL_HOURS,
+        remaining_days=remaining_days,
+        assumed_window_hours_if_unknown=ASSUMED_WINDOW_HOURS_IF_UNKNOWN,
+    )
+    return stats.format_report_ja(report, remaining_days, TARGET_DATE)
+
+
 def run_once() -> None:
     state = load_state()
     changed_any = False
@@ -258,6 +321,8 @@ def run_once() -> None:
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page(locale="ja-JP")
+
+        any_available_this_run = False
 
         for hotel_name in TARGET_HOTELS:
             key = f"{hotel_name}_{TARGET_DATE}"
@@ -275,6 +340,9 @@ def run_once() -> None:
             results_summary.append(f"{hotel_name}: {result.raw_mark}"
                                     f"（{'空きあり' if result.available else '空きなし'}）")
 
+            if result.available:
+                any_available_this_run = True
+
             if result.available and not prev_available:
                 notify(
                     f"{hotel_name} {TARGET_DATE} 大人{ADULTS_PER_ROOM}名×{ROOMS}部屋"
@@ -285,6 +353,10 @@ def run_once() -> None:
             state[key] = asdict(result)
 
         browser.close()
+
+    # --- ベイズ推定の更新（3施設合算で「どこか1つでも空いていたか」を見る）---
+    stats_report_text = update_stats_and_report(state, any_available_this_run)
+    print(stats_report_text)
 
     # --- 定期診断通知（ハートビート） ---
     # 空きの有無にかかわらず、一定時間おきに「監視は生きています」を
@@ -302,6 +374,7 @@ def run_once() -> None:
         notify(
             f"【定期診断】{TARGET_DATE} の空室監視レポート\n"
             f"{summary_text}\n\n"
+            f"{stats_report_text}\n\n"
             f"（{HEARTBEAT_INTERVAL_HOURS}時間おき設定のハートビート通知です。"
             f"空きが出た場合は別途、変化があった瞬間に通知します）"
         )
