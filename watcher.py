@@ -77,8 +77,8 @@ AVAILABLE_MARKS = {"○", "◎", "△"}
 FULL_MARKS = {"×", "－", "―", "満室", "×満室"}
 
 # 通知方法: "ntfy" (お手軽・無料・登録不要) / "discord" / "email" (Gmail経由)
-NOTIFY_METHOD = "email"
-NTFY_TOPIC = "itoen-watch-CHANGE-ME"
+NOTIFY_METHOD = "ntfy"
+NTFY_TOPIC = "itoen"
 DISCORD_WEBHOOK_URL = ""
 
 # --- email(Gmail)を使う場合 ---
