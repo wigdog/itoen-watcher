@@ -3,7 +3,7 @@ name: Itoen Watcher
 # n時間おきに自動実行 + 手動実行ボタンも使えるようにしておく
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "14 * * * *"   # 毎時13分（1時間おき、かつ混雑を避ける）
   workflow_dispatch: {}
 
 jobs:
