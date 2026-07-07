@@ -22,9 +22,9 @@
   playwright install chromium
 
 【重要な注意】
-  - 「エリアまたは施設」プルダウンは単一選択なので、3施設を見るには
-    このスクリプトは内部で3回検索を実行します（1回の実行で3施設分
-    チェックします）。
+  - 「エリアまたは施設」プルダウンは単一選択なので、複数施設を見るには
+    このスクリプトは内部でTARGET_HOTELSの数だけ検索を繰り返します
+    （1回の実行でTARGET_HOTELSに書かれた施設を順番に全てチェックします）。
   - 検索結果ページの正確なDOM構造は未確認のため、空室判定は
     「テキストからの正規表現抽出」＋「念のためスクリーンショット保存」
     の二段構えにしています。最初のうちはスクリーンショットも
@@ -56,15 +56,16 @@ import stats
 
 SEARCH_URL = "https://www5.489pro.com/asp/g/c/calendar.asp?kp=itoen&ty=&sp=&lan=JPN"
 
-# 「エリアまたは施設」プルダウンの value 属性（実ページのHTMLから確認済み）
-HOTEL_VALUES = {
-    "伊東園ホテル": "y22440801_a15",
-    "伊東園ホテル別館": "y22440804_a15",
-    "伊東園ホテル松川館": "y22440838_a15",
-}
-
-# 監視したいホテル名（上のHOTEL_VALUESのキーと一致させる）
-TARGET_HOTELS = list(HOTEL_VALUES.keys())
+# 監視したいホテル名（プルダウンの表示テキストと一致させる。
+# 全角/半角スペースの有無はコード側で自動的に無視して照合するので、
+# ここでは気にせず見たままの名前を書けばOK）
+TARGET_HOTELS = [
+    "伊東園ホテル",
+    "伊東園ホテル別館",
+    "伊東園ホテル松川館",
+    "伊東園ホテル熱川",
+    "伊東園ホテル 稲取",
+]
 TARGET_DATE = "2026-07-25"
 
 # 人数・部屋構成
@@ -77,8 +78,8 @@ AVAILABLE_MARKS = {"○", "◎", "△"}
 FULL_MARKS = {"×", "－", "―", "満室", "×満室"}
 
 # 通知方法: "ntfy" (お手軽・無料・登録不要) / "discord" / "email" (Gmail経由)
-NOTIFY_METHOD = "ntfy"
-NTFY_TOPIC = "itoen-20260725yoyaku"
+NOTIFY_METHOD = "email"
+NTFY_TOPIC = "itoen-watch-CHANGE-ME"
 DISCORD_WEBHOOK_URL = ""
 
 # --- email(Gmail)を使う場合 ---
@@ -199,11 +200,26 @@ def run_search_for_hotel(page, hotel_name: str, date_str: str) -> CheckResult:
         page.fill("#s_month", m)
         page.fill("#s_day", d)
 
-        # --- エリアまたは施設（表示テキストに全角スペースが入っているため
-        #     labelではなくvalue属性で選択する）---
-        hotel_value = HOTEL_VALUES.get(hotel_name)
+        # --- エリアまたは施設（表示テキストに全角/半角スペースが混ざることが
+        #     あるため、空白を除いた文字列で比較して一致するoptionのvalueを
+        #     その場で拾う。これでvalue属性を事前に調べておく必要がなくなる）---
+        target_norm = hotel_name.replace(" ", "").replace("\u3000", "").strip()
+        options = page.eval_on_selector_all(
+            "select[name='area_yado_id'] option",
+            "els => els.map(el => ({value: el.value, text: el.textContent}))",
+        )
+        hotel_value = None
+        for opt in options:
+            opt_norm = (opt["text"] or "").replace(" ", "").replace("\u3000", "").strip()
+            if opt_norm == target_norm:
+                hotel_value = opt["value"]
+                break
         if not hotel_value:
-            raise ValueError(f"HOTEL_VALUESに「{hotel_name}」の定義がありません。")
+            raise ValueError(
+                f"プルダウンに「{hotel_name}」に一致する施設が見つかりません。"
+                f"表記が違う可能性があるので、TARGET_HOTELSの名前を"
+                f"サイト上の表示と見比べてください。"
+            )
         page.select_option("select[name='area_yado_id']", value=hotel_value)
 
         # --- 人数・泊数・部屋数 ---
@@ -354,13 +370,13 @@ def run_once() -> None:
 
         browser.close()
 
-    # --- ベイズ推定の更新（3施設合算で「どこか1つでも空いていたか」を見る）---
+    # --- ベイズ推定の更新（全施設合算で「どこか1つでも空いていたか」を見る）---
     stats_report_text = update_stats_and_report(state, any_available_this_run)
     print(stats_report_text)
 
     # --- 定期診断通知（ハートビート） ---
     # 空きの有無にかかわらず、一定時間おきに「監視は生きています」を
-    # 3施設まとめて1通で知らせる。
+    # TARGET_HOTELS全施設まとめて1通で知らせる。
     last_heartbeat_str = state.get("_last_heartbeat")
     now = datetime.now()
     should_send_heartbeat = True
