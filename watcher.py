@@ -22,9 +22,9 @@
   playwright install chromium
 
 【重要な注意】
-  - 「エリアまたは施設」プルダウンは単一選択なので、複数施設を見るには
-    このスクリプトは内部でTARGET_HOTELSの数だけ検索を繰り返します
-    （1回の実行でTARGET_HOTELSに書かれた施設を順番に全てチェックします）。
+  - 「エリアまたは施設」プルダウンは単一選択なので、3施設を見るには
+    このスクリプトは内部で3回検索を実行します（1回の実行で3施設分
+    チェックします）。
   - 検索結果ページの正確なDOM構造は未確認のため、空室判定は
     「テキストからの正規表現抽出」＋「念のためスクリーンショット保存」
     の二段構えにしています。最初のうちはスクリーンショットも
@@ -77,9 +77,13 @@ ROOMS = 1             # 部屋数（大人1名・1部屋で検索）
 AVAILABLE_MARKS = {"○", "◎", "△"}
 FULL_MARKS = {"×", "－", "―", "満室", "×満室"}
 
-# 通知方法: "ntfy" (お手軽・無料・登録不要) / "discord" / "email" (Gmail経由)
-NOTIFY_METHOD = "email"
-NTFY_TOPIC = "itoen-watch-CHANGE-ME"
+# 通知方法は「空きが出た瞬間の即時通知」と「定期診断(ハートビート)」で
+# それぞれ別々に指定する（1つの変数で両方を兼ねると、どちらかを変更した
+# ときにもう片方まで巻き込んで変わってしまう事故が起きやすいため分離）。
+# 選べる値: "ntfy" (お手軽・無料・登録不要) / "discord" / "email" (Gmail経由)
+IMMEDIATE_NOTIFY_METHOD = "ntfy"   # 空きが出た瞬間はスマホにすぐ気づけるntfy
+HEARTBEAT_NOTIFY_METHOD = "email"  # 定期診断はGmailに届くメールでまとめて確認
+NTFY_TOPIC = "itoen-20260725yoyaku"
 DISCORD_WEBHOOK_URL = ""
 
 # --- email(Gmail)を使う場合 ---
@@ -121,10 +125,10 @@ ASSUMED_WINDOW_HOURS_IF_UNKNOWN = 0.25
 # 通知処理
 # ============================================================
 
-def notify(message: str) -> None:
-    print(f"[NOTIFY] {message}")
+def notify(message: str, method: str) -> None:
+    print(f"[NOTIFY via {method}] {message}")
     try:
-        if NOTIFY_METHOD == "ntfy":
+        if method == "ntfy":
             req = urllib.request.Request(
                 url=f"https://ntfy.sh/{NTFY_TOPIC}",
                 data=message.encode("utf-8"),
@@ -132,7 +136,7 @@ def notify(message: str) -> None:
                 method="POST",
             )
             urllib.request.urlopen(req, timeout=10)
-        elif NOTIFY_METHOD == "discord" and DISCORD_WEBHOOK_URL:
+        elif method == "discord" and DISCORD_WEBHOOK_URL:
             payload = json.dumps({"content": message}).encode("utf-8")
             req = urllib.request.Request(
                 url=DISCORD_WEBHOOK_URL,
@@ -141,7 +145,7 @@ def notify(message: str) -> None:
                 method="POST",
             )
             urllib.request.urlopen(req, timeout=10)
-        elif NOTIFY_METHOD == "email":
+        elif method == "email":
             if not GMAIL_ADDRESS or not GMAIL_APP_PASSWORD:
                 print("[NOTIFY] GMAIL_ADDRESS / GMAIL_APP_PASSWORD が未設定です。"
                       "環境変数(ローカルなら.env等、GitHub ActionsならSecrets)"
@@ -155,7 +159,7 @@ def notify(message: str) -> None:
                 server.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
                 server.sendmail(GMAIL_ADDRESS, [EMAIL_TO], msg.as_string())
         else:
-            print("通知方法が正しく設定されていません。CONFIGを確認してください。")
+            print(f"通知方法「{method}」が正しく設定されていません。CONFIGを確認してください。")
     except Exception as e:
         print(f"通知の送信に失敗しました: {e}")
 
@@ -200,6 +204,8 @@ def run_search_for_hotel(page, hotel_name: str, date_str: str) -> CheckResult:
         page.fill("#s_month", m)
         page.fill("#s_day", d)
 
+        # --- エリアまたは施設（表示テキストに全角スペースが入っているため
+        #     labelではなくvalue属性で選択する）---
         # --- エリアまたは施設（表示テキストに全角/半角スペースが混ざることが
         #     あるため、空白を除いた文字列で比較して一致するoptionのvalueを
         #     その場で拾う。これでvalue属性を事前に調べておく必要がなくなる）---
@@ -362,7 +368,8 @@ def run_once() -> None:
             if result.available and not prev_available:
                 notify(
                     f"{hotel_name} {TARGET_DATE} 大人{ADULTS_PER_ROOM}名×{ROOMS}部屋"
-                    f" の空室が見つかりました！（記号: {result.raw_mark}）\n{SEARCH_URL}"
+                    f" の空室が見つかりました！（記号: {result.raw_mark}）\n{SEARCH_URL}",
+                    method=IMMEDIATE_NOTIFY_METHOD,
                 )
                 changed_any = True
 
@@ -392,7 +399,8 @@ def run_once() -> None:
             f"{summary_text}\n\n"
             f"{stats_report_text}\n\n"
             f"（{HEARTBEAT_INTERVAL_HOURS}時間おき設定のハートビート通知です。"
-            f"空きが出た場合は別途、変化があった瞬間に通知します）"
+            f"空きが出た場合は別途、変化があった瞬間に通知します）",
+            method=HEARTBEAT_NOTIFY_METHOD,
         )
         state["_last_heartbeat"] = now.isoformat()
 
