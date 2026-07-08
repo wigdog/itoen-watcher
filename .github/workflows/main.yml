@@ -6,6 +6,10 @@ on:
     - cron: "14 * * * *"   # 毎時13分（1時間おき、かつ混雑を避ける）
   workflow_dispatch: {}
 
+concurrency:
+  group: itoen-watcher-run
+  cancel-in-progress: false
+
 jobs:
   check-availability:
     runs-on: ubuntu-latest
