@@ -304,7 +304,16 @@ let NOW_OVERRIDE = null; // for demo "now" time override per trip
 function uid(p){ return p+'_'+Math.random().toString(36).slice(2,9); }
 function localDateStr(d){ const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${day}`; }
 function load(){ try{ const raw = localStorage.getItem('travelos_db'); if(raw) DB = JSON.parse(raw); }catch(e){} }
-function save(){ localStorage.setItem('travelos_db', JSON.stringify(DB)); }
+function save(){
+  try{
+    localStorage.setItem('travelos_db', JSON.stringify(DB));
+    return true;
+  }catch(err){
+    console.error('save error', err);
+    toast('保存容量の上限に達した可能性があります（写真サイズをご確認ください）');
+    return false;
+  }
+}
 function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove('show'),1800); }
 function yen(n){ return '¥'+Math.round(n||0).toLocaleString(); }
 function fmtDate(d){ if(!d) return ''; const dt=new Date(d+'T00:00:00'); return `${dt.getMonth()+1}/${dt.getDate()}`; }
@@ -403,7 +412,10 @@ function renderTripList(){
   return `
   <div class="topbar">
     <h2>旅行一覧</h2>
-    <div class="side"><button class="icon-btn" id="btnAbout"><span class="material-symbols-rounded">info</span></button></div>
+    <div class="side">
+      <button class="icon-btn" id="btnExportAll" title="全データを書き出し"><span class="material-symbols-rounded">cloud_upload</span></button>
+      <button class="icon-btn" id="btnAbout"><span class="material-symbols-rounded">info</span></button>
+    </div>
   </div>
   <div class="screen active">
     <div class="trip-list">${DB.trips.length? cards : empty}</div>
@@ -417,6 +429,11 @@ function bindTripList(){
   document.getElementById('btnStart')?.addEventListener('click', ()=>{ DB._seen=true; save(); render(); });
   document.getElementById('fabAdd')?.addEventListener('click', createTrip);
   document.getElementById('btnAbout')?.addEventListener('click', ()=>toast('Travel OS ─ 旅行をもっと自由に'));
+  document.getElementById('btnExportAll')?.addEventListener('click', ()=>{
+    const blob = new Blob([JSON.stringify(DB,null,2)],{type:'application/json'});
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'trips.json'; a.click();
+    toast('trips.json を書き出しました');
+  });
   document.querySelectorAll('[data-act]').forEach(btn=>{
     btn.addEventListener('click', (e)=>{
       const id = btn.dataset.id, act = btn.dataset.act;
@@ -619,7 +636,36 @@ function openTripSettingsSheet(){
     tripDays(t); save(); closeSheet(); CUR.dayIdx=0; render(); toast('保存しました');
   };
 }
-function fileToDataUrl(file, cb){ if(!file) return; const r = new FileReader(); r.onload=()=>cb(r.result); r.readAsDataURL(file); }
+function fileToDataUrl(file, cb, opts){
+  if(!file) return;
+  const maxDim = (opts&&opts.maxDim) || 1280;
+  const quality = (opts&&opts.quality) || 0.72;
+  const r = new FileReader();
+  r.onload = ()=>{
+    const rawUrl = r.result;
+    if(!file.type || !file.type.startsWith('image/')){ cb(rawUrl); return; }
+    const img = new Image();
+    img.onload = ()=>{
+      try{
+        let w = img.naturalWidth, h = img.naturalHeight;
+        if(w>maxDim || h>maxDim){
+          if(w>=h){ h = Math.round(h*maxDim/w); w = maxDim; } else { w = Math.round(w*maxDim/h); h = maxDim; }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img,0,0,w,h);
+        const compressed = canvas.toDataURL('image/jpeg', quality);
+        // Only use the compressed version if it's actually smaller (guards tiny/simple images)
+        cb(compressed.length < rawUrl.length ? compressed : rawUrl);
+      }catch(err){ console.error('image compress error', err); cb(rawUrl); }
+    };
+    img.onerror = ()=>cb(rawUrl);
+    img.src = rawUrl;
+  };
+  r.onerror = ()=>{ console.error('file read error'); toast('画像の読み込みに失敗しました'); };
+  r.readAsDataURL(file);
+}
 
 /* ---- Event sheet (covers hotel/food/spot/transport rich fields) ---- */
 function openEventSheet(evId){
@@ -704,7 +750,8 @@ function renderEventSheet(isEdit){
     const t = currentTrip(); const day = t.days[CUR.dayIdx];
     const idx = day.events.findIndex(e=>e.id===EDIT_EVENT.id);
     if(idx>=0) day.events[idx] = EDIT_EVENT; else day.events.push(EDIT_EVENT);
-    save(); closeSheet(); render(); toast('保存しました');
+    const ok = save(); closeSheet(); render();
+    if(ok) toast('保存しました');
   };
   const delBtn = document.getElementById('delEvent');
   if(delBtn) delBtn.onclick = ()=>{
@@ -1072,7 +1119,7 @@ window.load = function(){
 };
 
 // 2) Never write anything back (no localStorage writes in viewer mode).
-window.save = function(){};
+window.save = function(){ return true; };
 
 // 3) Redirect editing entry points to read-only equivalents.
 window.openEventSheet = function(evId){
