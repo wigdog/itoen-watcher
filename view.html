@@ -243,9 +243,23 @@ input,textarea,select{font-family:inherit;}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(-6px);}
 
 @media(prefers-reduced-motion: reduce){*{animation:none !important;transition:none !important;}}
+/* ---------- Read-only viewer mode ---------- */
+body.readonly .fab,
+body.readonly #btnAddEvent,
+body.readonly .trip-actions .more,
+body.readonly .checklist-row button,
+body.readonly .checklist-row input,
+body.readonly #fNewPk,
+body.readonly #addPk,
+body.readonly #addHotel{display:none !important;}
+body.readonly #ratingRow,
+body.readonly #memNote,
+body.readonly #saveMemNote{pointer-events:none;opacity:.55;}
+body.readonly .readonly-badge{position:sticky;top:0;z-index:15;background:var(--ocean-deep);color:#fff;font-size:11px;font-weight:700;text-align:center;padding:5px;letter-spacing:.04em;}
 </style>
 </head>
-<body>
+<body class="readonly">
+<div class="readonly-badge">👀 閲覧専用モード（編集はできません）</div>
 <div id="app"></div>
 <div class="sheet-backdrop" id="sheetBackdrop"></div>
 <div class="toast" id="toast"></div>
@@ -1035,6 +1049,43 @@ function bindMemory(){
   document.querySelectorAll('[data-star]').forEach(b=>b.onclick=()=>{ t.rating=+b.dataset.star; save(); render(); });
   document.getElementById('saveMemNote').onclick = ()=>{ t.memNote = document.getElementById('memNote').value; save(); toast('メモを保存しました'); };
 }
+</script>
+<script>
+/* ===================== Read-only viewer patch ===================== */
+/* This page never writes data anywhere — it only fetches ./data/trips.json
+   (published by the editor's "全データを書き出し" button) and disables
+   every editing/saving entry point in the shared app code above. */
+
+// 1) Load data from the published JSON file instead of localStorage.
+window.load = function(){
+  fetch('./data/trips.json', {cache:'no-store'})
+    .then(r=>{ if(!r.ok) throw new Error('trips.json not found'); return r.json(); })
+    .then(data=>{ DB = data && data.trips ? data : {trips:[]}; render(); })
+    .catch(err=>{
+      console.error('viewer load error', err);
+      document.getElementById('app').innerHTML = `<div class="empty-state" style="padding:80px 24px">
+        <div class="ic"><span class="material-symbols-rounded">cloud_off</span></div>
+        <h3>データを読み込めませんでした</h3>
+        <p>data/trips.json がまだアップロードされていないか、パスが違う可能性があります。</p>
+      </div>`;
+    });
+};
+
+// 2) Never write anything back (no localStorage writes in viewer mode).
+window.save = function(){};
+
+// 3) Redirect editing entry points to read-only equivalents.
+window.openEventSheet = function(evId){
+  if(!evId){ toast('閲覧専用モードです'); return; }
+  const t = currentTrip(); if(!t) return;
+  const day = t.days[CUR.dayIdx];
+  const ev = day && day.events.find(e=>e.id===evId);
+  if(ev) openTravelDetail(ev);
+};
+window.openTripMoreSheet = function(){ toast('閲覧専用モードのため操作できません'); };
+window.openTripSettingsSheet = function(){ toast('閲覧専用モードのため編集できません'); };
+window.openBudgetEditSheet = function(){ toast('閲覧専用モードのため編集できません'); };
+window.openDataSheet = function(){ toast('閲覧専用モードのため利用できません'); };
 </script>
 </body>
 </html>
