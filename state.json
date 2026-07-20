@@ -9,8 +9,8 @@
   "伊東園ホテル別館_2026-07-25": {
     "hotel": "伊東園ホテル別館",
     "date": "2026-07-25",
-    "available": false,
-    "raw_mark": "×",
+    "available": true,
+    "raw_mark": "○",
     "screenshot": "/home/runner/work/itoen-watcher/itoen-watcher/screenshots/伊東園ホテル別館_2026-07-25.png"
   },
   "伊東園ホテル松川館_2026-07-25": {
@@ -21,12 +21,12 @@
     "screenshot": "/home/runner/work/itoen-watcher/itoen-watcher/screenshots/伊東園ホテル松川館_2026-07-25.png"
   },
   "_stats_log_first_ts": "2026-06-26T20:28:50.420285",
-  "_stats_arrivals": 2,
-  "_stats_last_combined_available": false,
+  "_stats_arrivals": 3,
+  "_stats_last_combined_available": true,
   "_stats_open_windows": [
     4.1920787002777775
   ],
-  "_last_heartbeat": "2026-07-20T00:15:57.281265",
+  "_last_heartbeat": "2026-07-20T04:54:26.004239",
   "伊東園ホテル熱川_2026-07-25": {
     "hotel": "伊東園ホテル熱川",
     "date": "2026-07-25",
@@ -41,5 +41,5 @@
     "raw_mark": "×",
     "screenshot": "/home/runner/work/itoen-watcher/itoen-watcher/screenshots/伊東園ホテル_稲取_2026-07-25.png"
   },
-  "_stats_available_since_ts": "2026-07-09T14:01:43.202586"
+  "_stats_available_since_ts": "2026-07-20T04:54:25.998331"
 }
