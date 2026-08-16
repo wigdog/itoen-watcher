@@ -49,8 +49,8 @@
   "伊東園ホテル 稲取_2026-07-25": {
     "hotel": "伊東園ホテル 稲取",
     "date": "2026-07-25",
-    "available": true,
-    "raw_mark": "○",
+    "available": false,
+    "raw_mark": "×",
     "screenshot": "/home/runner/work/itoen-watcher/itoen-watcher/screenshots/伊東園ホテル_稲取_2026-07-25.png"
   },
   "_stats_available_since_ts": "2026-08-15T15:36:10.145125"
