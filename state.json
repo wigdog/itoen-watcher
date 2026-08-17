@@ -9,8 +9,8 @@
   "伊東園ホテル別館_2026-07-25": {
     "hotel": "伊東園ホテル別館",
     "date": "2026-07-25",
-    "available": true,
-    "raw_mark": "○",
+    "available": false,
+    "raw_mark": "×",
     "screenshot": "/home/runner/work/itoen-watcher/itoen-watcher/screenshots/伊東園ホテル別館_2026-07-25.png"
   },
   "伊東園ホテル松川館_2026-07-25": {
@@ -22,7 +22,7 @@
   },
   "_stats_log_first_ts": "2026-06-26T20:28:50.420285",
   "_stats_arrivals": 16,
-  "_stats_last_combined_available": true,
+  "_stats_last_combined_available": false,
   "_stats_open_windows": [
     4.1920787002777775,
     52.76334240805556,
@@ -37,7 +37,8 @@
     3.3590514958333335,
     2.278168818611111,
     23.5486548,
-    23.077734695
+    23.077734695,
+    23.14463719861111
   ],
   "_last_heartbeat": "2026-08-17T13:07:19.553513",
   "伊東園ホテル熱川_2026-07-25": {
