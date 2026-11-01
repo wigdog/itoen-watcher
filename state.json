@@ -74,12 +74,12 @@
     89.45776882972223,
     10.304368728055556
   ],
-  "_last_heartbeat": "2026-11-01T07:37:52.231784",
+  "_last_heartbeat": "2026-11-01T15:12:05.999849",
   "伊東園ホテル熱川_2026-07-25": {
     "hotel": "伊東園ホテル熱川",
     "date": "2026-07-25",
-    "available": false,
-    "raw_mark": "×",
+    "available": true,
+    "raw_mark": "○",
     "screenshot": "/home/runner/work/itoen-watcher/itoen-watcher/screenshots/伊東園ホテル熱川_2026-07-25.png"
   },
   "伊東園ホテル 稲取_2026-07-25": {
